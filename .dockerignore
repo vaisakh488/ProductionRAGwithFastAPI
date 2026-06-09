@@ -1,0 +1,58 @@
+# .dockerignore — prevents secrets, dev artifacts, and large files
+# from being included in the Docker build context via COPY . .
+#
+# Without this file, COPY . . in both Dockerfiles would include:
+#   .env        — API keys and passwords baked into image layers
+#   .git/       — full git history (potentially hundreds of MB)
+#   __pycache__ — stale bytecode
+#   pdfs/       — local test PDFs (potentially large)
+#   grafana/    — monitoring config not needed in app images
+#   *.md        — documentation
+
+# ── Secrets ──────────────────────────────────────────────
+.env
+.env.*
+
+# ── Version control ───────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+
+# ── Python artifacts ──────────────────────────────────────
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+.pytest_cache
+.mypy_cache
+.ruff_cache
+*.egg-info
+dist/
+build/
+
+# ── IDE and editor ────────────────────────────────────────
+.vscode
+.idea
+*.swp
+*.swo
+
+# ── Data files not needed in image ────────────────────────
+pdfs/
+*.pdf
+
+# ── Monitoring configs — mounted as volumes at runtime ────
+grafana/
+prometheus.yml
+promtail-config.yml
+
+# ── Documentation ─────────────────────────────────────────
+README*
+*.md
+CHANGELOG*
+LICENSE*
+
+# ── OS artifacts ──────────────────────────────────────────
+.DS_Store
+Thumbs.db

@@ -1,0 +1,98 @@
+# ══════════════════════════════════════════════════════════
+# Dockerfile.worker — Celery worker image
+#
+# Heavier than the API image because it needs:
+#   - sentence-transformers (cross-encoder reranker)
+#   - torch CPU wheel (~700 MB)
+#   - BAAI/bge-reranker-base model weights (~400 MB, pre-downloaded at build)
+#
+# The API image (Dockerfile) does NOT include these — saves ~1.1 GB
+# on the api / celery_beat / flower containers.
+#
+# Expected size: ~2.0–2.1 GB
+#
+# REVIEW FIXES (v5.1):
+#   [R1] torchvision removed — nothing in the codebase imports it.
+#        The pipeline is pure NLP (sentence-transformers, flashrank,
+#        BAAI cross-encoder). torchvision is a computer vision library
+#        and was adding ~200 MB to the image for no reason.
+#   [R2] Model pre-download is now a hard fail — the || echo fallback
+#        was allowing the build to succeed even when the model failed to
+#        download. The first ingest job would then stall for 2+ minutes
+#        while the model downloaded at runtime with no warning to the
+#        operator. A failed build is always better than a broken image.
+#   [R3] useradd runs before COPY so COPY --chown can be used directly.
+#        Avoids the separate chown -R layer that duplicated all inodes.
+#   [R4] EXPOSE moved above CMD — standard Dockerfile convention.
+# ══════════════════════════════════════════════════════════
+
+# ── Stage 1: builder ──────────────────────────────────────
+FROM python:3.11-slim AS builder
+
+WORKDIR /install
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    curl \
+ && rm -rf /var/lib/apt/lists/*
+
+# Copy both files — requirements-worker.txt references requirements-base.txt
+# via -r, so both must be present before pip runs
+COPY requirements-base.txt .
+COPY requirements-worker.txt .
+
+# [R1] torchvision removed — not imported anywhere in the codebase.
+# CPU-only torch installed first to prevent CUDA wheel being pulled
+# by sentence-transformers as a dependency.
+RUN pip install --upgrade pip --no-cache-dir \
+ && pip install --no-cache-dir \
+    --prefix=/install/packages \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    torch==2.3.0+cpu \
+ && pip install --no-cache-dir \
+    --prefix=/install/packages \
+    -r requirements-worker.txt
+
+
+# ── Stage 2: runtime ──────────────────────────────────────
+FROM python:3.11-slim AS runtime
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /install/packages /usr/local
+
+# Pre-download the BAAI reranker model into the image at build time.
+# Without this, the first ingest job stalls for ~2 min while downloading.
+# The model is cached in /app/.cache/huggingface inside the image.
+ENV HF_HOME=/app/.cache/huggingface
+ENV SENTENCE_TRANSFORMERS_HOME=/app/.cache/sentence_transformers
+
+# [R3] Create user and dirs BEFORE COPY so --chown can be used directly.
+RUN useradd -m -u 1000 appuser \
+ && mkdir -p /app/pdfs /app/.cache/huggingface /app/.cache/sentence_transformers \
+ && chown appuser:appuser /app/pdfs
+
+COPY --chown=appuser:appuser . .
+
+# [R2] Hard fail on model download — if the model cannot be downloaded
+# at build time the build fails loudly rather than producing a broken
+# image that stalls silently on the first ingest job.
+# The || echo fallback has been removed intentionally.
+RUN python -c "from sentence_transformers import CrossEncoder; \
+    CrossEncoder('BAAI/bge-reranker-base', max_length=512)"
+
+# Transfer ownership of cached model files to appuser after download
+RUN chown -R appuser:appuser /app/.cache
+
+USER appuser
+
+# [R4] EXPOSE before CMD — standard Dockerfile convention.
+EXPOSE 8000
+
+CMD ["celery", "-A", "tasks", "worker", "--loglevel=info", "--concurrency=2"]

@@ -1,0 +1,15 @@
+# requirements-worker.txt
+# Used by: celery_worker ONLY
+# Installs everything in requirements-base.txt PLUS the heavy ML deps
+# Estimated additional size: ~1.5 GB (torch CPU + sentence-transformers + model)
+
+-r requirements-base.txt
+
+# ── Rerankers — only needed in the worker that runs ingest_pipeline ──
+sentence-transformers>=2.7.0,<3.0.0
+flashrank>=0.2.9
+# torch is installed separately in Dockerfile.worker with CPU-only wheel
+
+# ── Pin transformers to avoid 'name nn is not defined' bug in 4.52+ ──
+# See: https://github.com/huggingface/transformers/issues/37952
+transformers>=4.40.0,<4.52.0

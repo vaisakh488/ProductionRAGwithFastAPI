@@ -1,0 +1,37 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+
+  - job_name: rag_api
+    static_configs:
+      - targets: ['api:8000']
+    metrics_path: /metrics
+    # No auth needed — /metrics is unauthenticated
+
+  - job_name: qdrant
+    static_configs:
+      - targets: ['qdrant:6333']
+    metrics_path: /metrics
+
+  # ── postgres-exporter — DISABLED (service not in docker-compose.yml) ──
+  # Uncomment this block AND add the postgres-exporter service to
+  # docker-compose.yml to enable PostgreSQL metrics scraping.
+  #
+  # Example docker-compose.yml service to add:
+  #   postgres_exporter:
+  #     image: prometheuscommunity/postgres-exporter:v0.15.0
+  #     container_name: rag_postgres_exporter
+  #     environment:
+  #       DATA_SOURCE_NAME: "postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/ragdb?sslmode=disable"
+  #     networks:
+  #       - rag_network
+  #     depends_on:
+  #       postgres:
+  #         condition: service_healthy
+  #     restart: unless-stopped
+  #
+  # - job_name: postgres
+  #   static_configs:
+  #     - targets: ['postgres-exporter:9187']

@@ -1,0 +1,45 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+
+  # ── Scrape all Docker container logs ─────────────────────
+  # Promtail reads directly from Docker's log files and labels
+  # each log line with the container name, compose service, and image.
+  - job_name: docker_containers
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+
+    relabel_configs:
+      # Use container name as the instance label
+      - source_labels: [__meta_docker_container_name]
+        target_label: container
+        regex: '/(.*)'
+
+      # Use docker-compose service name as the service label
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label: service
+
+      # Add compose project as a label
+      - source_labels: [__meta_docker_container_label_com_docker_compose_project]
+        target_label: project
+
+      # Keep log stream (stdout/stderr)
+      - source_labels: [__meta_docker_container_log_stream]
+        target_label: stream
+
+    pipeline_stages:
+      # Parse log level from Python logging format:
+      # "2026-06-01 12:00:00 [INFO] message"
+      - regex:
+          expression: '.*\[(?P<level>DEBUG|INFO|WARNING|ERROR|CRITICAL)\].*'
+      - labels:
+          level:

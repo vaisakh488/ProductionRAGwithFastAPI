@@ -1,0 +1,52 @@
+apiVersion: 1
+
+# ── Grafana Datasource Provisioning ───────────────────────
+#
+# IMPORTANT — this file must live at:
+#   grafana/provisioning/datasources/datasources.yml
+#
+# docker-compose.yml mounts:
+#   ./grafana/provisioning → /etc/grafana/provisioning
+#
+# Grafana auto-provisions datasources from:
+#   /etc/grafana/provisioning/datasources/*.yml
+#
+# Common mistakes that break provisioning:
+#   - Directory typo:    provisoning  (missing 'i') → not found
+#   - Extra subdirectory: .../datasources/resources/file.yml → not found
+#   - Correct path:       .../datasources/file.yml → provisioned on startup
+#
+# REVIEW FIXES (v5.1):
+#   [R1] File moved to correct path — was at grafana/provisoning/resources/
+#        (typo in directory name + extra subdirectory level). Grafana was
+#        never finding this file and starting with no datasources configured.
+#   [R2] uid fields added to both datasources. Without stable UIDs,
+#        dashboard JSON that references datasources by UID breaks when
+#        the Grafana volume is wiped and datasources are recreated.
+#   [R3] editable changed from true to false. Provisioned datasources
+#        overwrite any UI edits on every Grafana restart — setting
+#        editable: true was misleading operators into making UI changes
+#        that were silently discarded on next restart.
+
+datasources:
+  # ── Prometheus ────────────────────────────────────────────
+  - name: Prometheus
+    uid: prometheus-main          # [R2] stable uid — dashboard JSON references survive volume wipe
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false               # [R3] UI edits overwritten on restart — use this file instead
+    jsonData:
+      httpMethod: POST
+      prometheusType: Prometheus
+
+  # ── Loki ─────────────────────────────────────────────────
+  - name: Loki
+    uid: loki-main                # [R2] stable uid
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false               # [R3] same reason as above
+    jsonData:
+      maxLines: 1000

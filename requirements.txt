@@ -1,0 +1,55 @@
+# ── Core API ──────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+gunicorn>=22.0.0              # process manager for multi-worker deployment
+python-multipart>=0.0.9
+pydantic>=2.7.0
+
+# ── Auth ──────────────────────────────────────────────────
+bcrypt==4.0.1
+python-jose[cryptography]>=3.3.0
+
+# ── LangChain / LangGraph ─────────────────────────────────
+langchain-core>=0.2.0
+langchain-openai>=0.1.0
+langchain-qdrant>=0.1.0
+langchain-text-splitters>=0.2.0
+langchain-community>=0.2.0
+langchain-experimental>=0.0.60
+langgraph>=0.1.0
+langsmith>=0.1.0
+
+# ── LangGraph checkpointer  [C3] ──────────────────────────
+# AsyncPostgresSaver — replaces MemorySaver for multi-worker deployments
+langgraph-checkpoint-postgres>=1.0.0
+
+# ── Task queue  [B3] ──────────────────────────────────────
+# Celery with Redis broker — production-grade async task queue
+celery[redis]>=5.3.0          # includes redis transport + kombu
+flower>=2.0.0                 # Celery monitoring UI (optional but recommended)
+
+# ── Vector DB ─────────────────────────────────────────────
+qdrant-client==1.13.0
+
+# ── Sparse retrieval ──────────────────────────────────────
+rank-bm25>=0.2.2
+
+# ── Rerankers ─────────────────────────────────────────────
+sentence-transformers>=2.7.0
+flashrank>=0.2.9
+
+# ── Async DB + cache ──────────────────────────────────────
+asyncpg>=0.29.0
+redis[hiredis]>=5.0.0
+
+# ── PDF parsing ───────────────────────────────────────────
+pypdf>=4.2.0
+
+# ── Rate limiting ─────────────────────────────────────────
+slowapi>=0.1.9
+
+# ── Utilities ─────────────────────────────────────────────
+python-dotenv>=1.0.0
+httpx>=0.27.0
+numpy>=1.26
+werkzeug

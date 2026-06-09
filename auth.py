@@ -1,48 +1,6 @@
 """
 auth.py — Production Auth v3
 
-FIXES IN THIS VERSION:
-  [C4] USERS_SCHEMA_SQL no longer seeds admin with '$placeholder$'.
-       '$placeholder$' is not a valid bcrypt hash — bcrypt.checkpw() raises
-       an exception (not just returns False), which means every admin login
-       attempt threw a 500 before this fix.
-
-       New behaviour:
-         • The seed row uses a real bcrypt hash of the literal string
-           "__CHANGE_ME__" as a safe placeholder.  This hash is valid so
-           bcrypt never throws; it just won't match any real password.
-         • On startup, main.py sets the real password from ADMIN_PASSWORD
-           env var (this was already the intent — now it actually works
-           because the row exists and is valid).
-         • If ADMIN_PASSWORD is not set the admin account exists but is
-           effectively locked (no password will match the placeholder hash),
-           which is safe.
-
-       The hash below was generated with:
-           import bcrypt
-           bcrypt.hashpw(b"__CHANGE_ME__", bcrypt.gensalt(rounds=12)).decode()
-       It is deterministic only in the sense that it was generated once and
-       committed.  It is NOT the string "__CHANGE_ME__" — it is a one-way
-       hash of it.
-
-  [R1] USERS_SCHEMA_SQL is now pure DDL — no data embedded in the SQL string.
-       The admin seed INSERT has been moved to main.py lifespan as a
-       parameterized execute call.  This eliminates f-string interpolation
-       in SQL (safe habit, not an active injection risk since _PLACEHOLDER_HASH
-       is a constant — but the pattern is wrong and must not be copied).
-
-  [R2] blocklist_token now handles tokens with no exp claim.
-       Previously, if exp was None the token was silently not blocklisted —
-       a logout call returned 200 but the token remained usable.
-       Now: falls back to ACCESS_TOKEN_EXPIRE_MINUTES * 60 as the TTL.
-
-  [R3] verify_password exception catch narrowed from bare Exception to
-       (ValueError, TypeError).  Catching all Exception was swallowing
-       programming errors (AttributeError, TypeError) and hiding real bugs.
-       Only ValueError (malformed hash) and TypeError (wrong type passed)
-       are expected from bcrypt.checkpw.
-
-  All previous auth.py upgrades (U1-U7, C4) are retained unchanged.
 """
 
 from __future__ import annotations

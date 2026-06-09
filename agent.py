@@ -1,47 +1,6 @@
 """
 agent.py — Production LangGraph RAG Agent v5
 
-FIXES IN THIS VERSION:
-  [C3] MemorySaver replaced with AsyncPostgresSaver from
-       langgraph-checkpoint-postgres.
-
-       MemorySaver is a Python dict inside one process.  With N uvicorn
-       workers:
-         • Worker A has user X's history — worker B doesn't
-         • Any worker restart wipes all conversation history
-         • RAM grows unboundedly with long-running deployments
-
-       AsyncPostgresSaver stores checkpoints in the existing PostgreSQL
-       database (new table: langgraph_checkpoints).  All workers share
-       the same history.  History survives restarts.
-
-       The graph is now compiled inside init_agent() which is called
-       from main.py's lifespan after the pg_pool is ready — it is no
-       longer compiled at module import time.
-
-  [F9] MMR replaced with similarity search (retained from v4).
-  All other fixes (F1-F8) retained.
-
-REVIEW FIXES (v5.1):
-  [R1] Duplicate _checkpointer_cm module-level definition removed.
-       The second assignment (identical no-op) silently overwrote the
-       first and created confusion about which was the live reference.
-  [R2] Unused imports removed: LangChainTracer, get_current_run_tree.
-       Unused function removed: _get_tracer().
-       @traceable decorators work independently via LANGCHAIN_TRACING_V2
-       env var and do not require these.
-  [R3] All print() calls replaced with logger.* calls.
-       print() output is invisible to log aggregators, cannot be filtered
-       by level, and is inconsistent with the rest of the codebase.
-       logger = logging.getLogger(__name__) added at module level.
-  [R4] LLM instantiated with timeout=60 and max_retries=2.
-       Previously a slow or unresponsive OpenAI API call would hold the
-       coroutine indefinitely until the gunicorn worker timeout (120s).
-       Now fails fast at 60s with 2 automatic retries on transient errors.
-
-IMPORTANT — dependency:
-  pip install langgraph-checkpoint-postgres
-  (add to requirements.txt)
 """
 
 from __future__ import annotations

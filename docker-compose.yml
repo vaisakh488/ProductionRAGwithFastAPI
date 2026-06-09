@@ -12,36 +12,6 @@
 #   prometheus                        — metrics scraper     :9090
 #   grafana                           — dashboards          :3001
 #
-# REVIEW FIXES (v5.1):
-#   [R1] celery_beat schedule moved from /tmp to persistent volume
-#        celery_beat_data:/var/spool/celerybeat — survives restarts.
-#        Previously /tmp was wiped on every restart causing beat to
-#        re-fire all periodic tasks immediately on boot.
-#   [R2] postgres max_connections raised from 100 to 200.
-#        Under normal load: api (4 workers × pool 20) + celery worker
-#        (pool 10) + LangGraph psycopg pool (10) = 100 — exactly at the
-#        old limit. Any spike caused "too many connections" errors.
-#   [R3] api port bound to 127.0.0.1:8000 instead of 0.0.0.0:8000.
-#        All other services already bind to 127.0.0.1. Direct exposure
-#        on all interfaces is only appropriate behind a reverse proxy.
-#   [R4] Redis healthcheck uses --no-auth-warning flag so the password
-#        is not visible in the ps aux process list on the host.
-#   [R5] Grafana GF_SECURITY_ADMIN_PASSWORD fallback to 'admin' removed.
-#        ${GRAFANA_PASSWORD:-admin} silently used 'admin' if the env var
-#        was missing. Now fails loudly — forces explicit configuration.
-#   [R6] celery_worker container_name added: rag_celery_worker.
-#        Without it Docker generates a random name making docker logs,
-#        docker exec, and docker stats harder to use.
-#   [R7] grafana depends_on loki now uses condition: service_healthy.
-#        loki has a healthcheck defined — using service_started was
-#        ignoring it and allowing Grafana to start before Loki was ready.
-#   [R8] promtail gated behind profile: linux-monitoring.
-#        /var/lib/docker/containers and /var/run/docker.sock are Linux-
-#        only paths that do not exist on Windows Docker Desktop. The
-#        profile makes promtail opt-in on Linux and safely absent on
-#        Windows without breaking the rest of the stack.
-#        Linux:   docker compose --profile linux-monitoring up
-#        Windows: docker compose up   (promtail not started)
 ##############################################################################
 
 services:

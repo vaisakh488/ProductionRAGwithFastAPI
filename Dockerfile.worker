@@ -11,19 +11,6 @@
 #
 # Expected size: ~2.0–2.1 GB
 #
-# REVIEW FIXES (v5.1):
-#   [R1] torchvision removed — nothing in the codebase imports it.
-#        The pipeline is pure NLP (sentence-transformers, flashrank,
-#        BAAI cross-encoder). torchvision is a computer vision library
-#        and was adding ~200 MB to the image for no reason.
-#   [R2] Model pre-download is now a hard fail — the || echo fallback
-#        was allowing the build to succeed even when the model failed to
-#        download. The first ingest job would then stall for 2+ minutes
-#        while the model downloaded at runtime with no warning to the
-#        operator. A failed build is always better than a broken image.
-#   [R3] useradd runs before COPY so COPY --chown can be used directly.
-#        Avoids the separate chown -R layer that duplicated all inodes.
-#   [R4] EXPOSE moved above CMD — standard Dockerfile convention.
 # ══════════════════════════════════════════════════════════
 
 # ── Stage 1: builder ──────────────────────────────────────

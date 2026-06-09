@@ -1,40 +1,6 @@
 """
 ingest.py — Production RAG Ingestion Engine v5
 
-FIXES IN THIS VERSION:
-  [C1] _semantic_merge hash-lookup bug fixed — original hash→vec map is
-       snapshot BEFORE the merge loop so mutated chunk dicts don't make
-       chunks disappear from the lookup.
-  [C2] Shallow copy of metadata fixed — metadata dict is fully reconstructed
-       (not spread from a mutated reference) so merges never corrupt the
-       original embedded list.
-  [B2] BM25 index persisted to Redis (compressed pickle) so every worker
-       loads the same index on startup rather than building independent
-       in-process copies.  New helpers: save_bm25_to_redis(),
-       load_bm25_from_redis(), rebuild_bm25_index() now accepts a redis
-       client and persists after build.
-  [B4] ingest_pipeline() NEVER creates its own asyncpg pool.  pg_pool is
-       a required parameter with no internal fallback.  CLI path creates
-       its own pool before calling the pipeline (unchanged behaviour).
-       The old internal pool creation that was present as a "fallback" is
-       removed entirely.
-
-  All previous fixes (F1-F13) are retained unchanged.
-
-REVIEW FIXES (v5.1):
-  [R1] load_from_redis now opens its own bytes-mode Redis client instead of
-       relying on the caller's decode_responses setting.  The previous latin-1
-       encode workaround was fragile — binary pickle data returned as str from
-       a decode_responses=True client would silently corrupt if any byte fell
-       outside the latin-1 range.  Now mirrors save_bm25_to_redis exactly:
-       both use decode_responses=False clients for all binary operations.
-  [R2] import json moved to top-level imports.  It was repeated inline inside
-       update_job_state() and get_job_state() — stdlib imports belong at the
-       top of the file.
-  [R3] elapsed_seconds now captured AFTER the BM25 rebuild step (step 7).
-       Previously elapsed was captured before rebuild, so the 10–60s rebuild
-       time was excluded from the reported elapsed_seconds in job summaries
-       and Redis state.  The reported time now reflects the full pipeline.
 """
 
 from __future__ import annotations

@@ -5,14 +5,7 @@
 # Those only belong in Dockerfile.worker (celery_worker).
 #
 # Expected final image size: ~600–800 MB
-#
-# REVIEW FIXES (v5.1):
-#   [R1] curl removed from builder stage — only needed in runtime for
-#        the /health endpoint healthcheck. Builder stage never uses it.
-#   [R2] useradd runs before COPY so COPY --chown=appuser can be used
-#        in a single layer. Previously COPY then chown -R created a full
-#        duplicate inode layer, bloating the image significantly.
-#   [R3] EXPOSE moved above CMD — standard Dockerfile convention.
+
 # ══════════════════════════════════════════════════════════
 
 # ── Stage 1: builder ──────────────────────────────────────

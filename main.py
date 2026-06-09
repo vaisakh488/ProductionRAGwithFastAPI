@@ -1,33 +1,6 @@
 """
 main.py — Production RAG API v5 (Celery edition)
 
-CHANGES FROM v4:
-  [C3] init_agent(pg_pool) called in lifespan — AsyncPostgresSaver checkpointer.
-  [B3] BackgroundTasks replaced with Celery task queue.
-       /ingest and /ingest/bulk call tasks.run_ingest_task.delay() and
-       return immediately. The Celery worker process owns all ingestion work.
-  [B2] BM25 loaded from Redis cache on startup; falls back to Qdrant rebuild.
-  [FIX] Filename collision — job_id prepended to stored filename.
-  [FIX] MAX_UPLOAD_BYTES imported from ingest.py — single source of truth.
-  [FIX] /metrics Content-Type corrected for Prometheus scraping.
-
-  All previous upgrades (U1–U14) retained unless superseded above.
-
-REVIEW FIXES (v5.1):
-  [R1] Admin seed INSERT added to lifespan as a parameterized execute call.
-       USERS_SCHEMA_SQL is now pure DDL (no data) — the seed row is inserted
-       here explicitly so no values are ever interpolated into SQL strings.
-       _PLACEHOLDER_HASH imported from auth.py for the seed call.
-  [R2] /auth/login rate-limited at 5/minute — brute force protection.
-  [R3] ChatRequest fields validated — question max 4000 chars, thread_id
-       max 100 chars, question min length 1 enforced at model level.
-  [R4] /documents pagination bounded — limit capped at 200, offset >= 0.
-  [R5] Bulk ingest response message now uses actual job_id variable
-       (was {{job_id}} escaped brace — printed literal text "{job_id}").
-  [R6] _register_job failure now logged at ERROR (was WARNING) so it
-       surfaces correctly in alerting.
-  [R7] All inline imports (asyncio, httpx, agent) moved to top-level.
-  [R8] /debug/history endpoint gated behind DEBUG_ENDPOINTS_ENABLED env var.
 """
 
 from __future__ import annotations

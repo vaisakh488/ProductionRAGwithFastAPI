@@ -2,7 +2,7 @@
 
 A production-grade Retrieval-Augmented Generation (RAG) system built to handle **5,000+ PDFs** with hybrid retrieval, async ingestion, persistent conversation memory, and full observability. Not a tutorial — a real deployment.
 
-![Architecture](architecture.png)
+![Architecture](architecture.svg)
 
 ---
 

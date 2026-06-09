@@ -155,7 +155,7 @@ ProductionRAGwithFastAPI/
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/your-username/ProductionRAGwithFastAPI.git
+git clone https://github.com/vaisakh488/ProductionRAGwithFastAPI.git
 cd ProductionRAGwithFastAPI
 ```
 

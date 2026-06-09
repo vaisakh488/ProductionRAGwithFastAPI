@@ -789,6 +789,3 @@ Pull requests welcome. Please:
 
 ---
 
-## License
-
-MIT

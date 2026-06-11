@@ -1,6 +1,5 @@
 """
 agent.py — Production LangGraph RAG Agent v5
-
 """
 
 from __future__ import annotations
@@ -52,9 +51,7 @@ RERANK_TOP_K      = 8
 MAX_CONTEXT_CHARS = 80_000
 
 # ── LLM ───────────────────────────────────────────────────
-# [R4] timeout=60 — fail fast instead of hanging indefinitely on slow
-#      OpenAI responses.  max_retries=2 — automatic retry on transient
-#      errors (rate limits, 5xx) before raising to the caller.
+
 llm = ChatOpenAI(
     model="gpt-4o-mini",
     temperature=0.3,
@@ -64,8 +61,7 @@ llm = ChatOpenAI(
 )
 
 # ── VECTOR STORE (lazy — initialised in init_agent) ───────
-# [C3] vectorstore is no longer a module-level global that blocks the
-# event loop at import time.  It is initialised once during lifespan.
+
 _vectorstore = None
 
 def _init_vectorstore(retries: int = 5, delay: float = 3.0):
@@ -77,7 +73,6 @@ def _init_vectorstore(retries: int = 5, delay: float = 3.0):
                 raise RuntimeError(
                     f"Qdrant unavailable after {retries} attempts: {exc}"
                 ) from exc
-            # [R3] was print() — use logger so this appears in structured logs
             logger.warning(
                 f"Qdrant not ready (attempt {attempt}/{retries}), "
                 f"retrying in {delay}s …"
@@ -112,7 +107,6 @@ def _load_reranker():
     if RERANKER_BACKEND == "baai":
         try:
             from sentence_transformers import CrossEncoder
-            # [R3] was print() — use logger
             logger.info("Loading reranker: BAAI/bge-reranker-base …")
             model = CrossEncoder("BAAI/bge-reranker-base", max_length=512)
             logger.info("BAAI reranker ready")
@@ -127,7 +121,6 @@ def _load_reranker():
     if RERANKER_BACKEND in ("baai", "flashrank"):
         try:
             from flashrank import Ranker
-            # [R3] was print()
             logger.info("Loading reranker: FlashRank ms-marco-MiniLM-L-12-v2 …")
             model = Ranker(
                 model_name="ms-marco-MiniLM-L-12-v2",
@@ -203,7 +196,6 @@ async def _dense_retrieve(query: str) -> list[Document]:
 @traceable(name="3. Sparse Retriever (BM25)", run_type="retriever")
 def _sparse_retrieve(query: str) -> list[Document]:
     if not bm25_index.is_ready:
-        # [R3] was print() — use logger.warning so this surfaces in log aggregators
         logger.warning("BM25 index not ready — sparse retrieval skipped")
         return []
     return bm25_index.search(query, top_k=TOP_K)
@@ -269,7 +261,6 @@ async def _generate(
         total_chars += chunk_len
 
     if len(context_parts) < len(reranked_docs):
-        # [R3] was print() — use logger.warning
         logger.warning(
             f"Context truncated: {len(context_parts)}/{len(reranked_docs)} docs "
             f"({total_chars} chars)"
@@ -338,27 +329,23 @@ def _rerank_flashrank(question: str, candidates: list[Document]) -> list[Documen
 
 async def query_rewriter_node(state: State) -> dict:
     rewritten = await _rewrite_query(state["question"])
-    # [R3] was print() — use logger.info
     logger.info(f"Rewritten query: {rewritten}")
     return {"rewritten_query": rewritten}
 
 
 async def dense_retriever_node(state: State) -> dict:
     docs = await _dense_retrieve(state["rewritten_query"])
-    # [R3] was print()
     logger.info(f"Dense retrieval: {len(docs)} docs")
     return {"dense_docs": docs}
 
 
 async def sparse_retriever_node(state: State) -> dict:
     docs = await _run_in_thread(_sparse_retrieve, state["rewritten_query"])
-    # [R3] was print()
     logger.info(f"Sparse (BM25): {len(docs)} docs")
     return {"sparse_docs": docs}
 
 
 def retrieval_merger_node(state: State) -> dict:
-    # [R3] was print()
     logger.info(
         f"Merger: dense={len(state['dense_docs'])} "
         f"sparse={len(state['sparse_docs'])} docs"
@@ -369,7 +356,6 @@ def retrieval_merger_node(state: State) -> dict:
 async def reranker_node(state: State) -> dict:
     reranked = await _rerank(state["question"], state["dense_docs"], state["sparse_docs"])
     rn, _ = _get_reranker()
-    # [R3] was print()
     logger.info(f"[{rn}] reranked → {len(reranked)} docs")
     return {"reranked_docs": reranked}
 
@@ -407,14 +393,12 @@ def _build_graph():
 
 
 # ── GRAPH (compiled lazily in init_agent) ─────────────────
-# [C3] graph is no longer a module-level global with MemorySaver.
-# It is set by init_agent() during lifespan, after pg_pool is ready.
+
 graph = None
 
 # Module-level checkpointer — kept open for application lifetime
 _checkpointer = None
 
-# [R1] Single definition — duplicate assignment removed.
 # Holds the psycopg AsyncConnectionPool opened in init_agent()
 # so shutdown_agent() can close it cleanly.
 _checkpointer_cm = None
@@ -491,7 +475,6 @@ async def init_agent(pg_pool) -> None:
     # 4. Compile graph
     graph = _build_graph().compile(checkpointer=_checkpointer)
 
-    # [R3] was print()
     logger.info("Agent initialised: AsyncPostgresSaver checkpointer ready")
 
 

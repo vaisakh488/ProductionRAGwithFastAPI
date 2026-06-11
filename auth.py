@@ -58,10 +58,7 @@ _PLACEHOLDER_HASH = (
 
 
 # ── DB SCHEMA (run once at startup) ───────────────────────
-# [R1] Pure DDL only — no data embedded in the SQL string.
-#      The admin seed INSERT is handled in main.py lifespan via a
-#      parameterized execute call so no values are ever interpolated
-#      into SQL strings.
+
 USERS_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS users (
     id              SERIAL PRIMARY KEY,
@@ -188,7 +185,6 @@ def create_refresh_token(data: dict) -> str:
         timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
     )
 
-
 def decode_token(token: str) -> dict:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -232,7 +228,6 @@ async def blocklist_token(token: str, redis: aioredis.Redis) -> None:
         if ttl > 0:
             await redis.setex(f"blocklist:{token}", ttl, "1")
     else:
-        # [R2] No exp claim — blocklist for the full access token lifetime
         # as a safety net so the token cannot be reused after logout.
         await redis.setex(
             f"blocklist:{token}",

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json                         # [R2] moved from inline imports inside functions
+import json
 import logging
 import os
 import pickle
@@ -85,7 +85,7 @@ MAX_UPLOAD_BYTES     = 50 * 1024 * 1024   # single source of truth — imported 
 
 SEMANTIC_MERGE_THRESHOLD = 0.88
 
-# Redis key for BM25 persistence  [B2]
+
 BM25_REDIS_KEY    = "bm25:index"
 BM25_BUILT_AT_KEY = "bm25:built_at"
 
@@ -97,7 +97,7 @@ embeddings = OpenAIEmbeddings(
 
 
 # ══════════════════════════════════════════════════════════
-# BM25 SINGLETON  [F3 + F4 + F7 + B2]
+# BM25 SINGLETON
 # ══════════════════════════════════════════════════════════
 
 class _BM25Index:
@@ -176,7 +176,6 @@ class _BM25Index:
         """
         async with self._get_lock():
             try:
-                # [R1] Always use a bytes-mode client — never depend on caller's
                 # decode_responses setting for binary pickle data.
                 bytes_redis = aioredis.from_url(REDIS_URL, decode_responses=False)
                 try:
@@ -516,7 +515,6 @@ async def _semantic_merge(
             combined = cur_text + "\n\n" + next_chunk["page_content"]
             if len(combined) <= CHUNK_SIZE * 2:
                 combined_hash = hashlib.sha256(combined.encode()).hexdigest()
-                # C2: reconstruct fully — never mutate in-place
                 cur_chunk = _clone_chunk(
                     cur_chunk,
                     override={
@@ -550,8 +548,7 @@ async def _semantic_merge(
             re_embedded[h] = vec
 
     # ── Reassemble ────────────────────────────────────────
-    # C1: original_vecs was snapshotted before any mutation so every
-    #     unmerged chunk's original hash is still present here.
+
     merged: list[tuple[dict, list[float]]] = []
     for chunk, _text in pending_merges:
         h   = chunk["metadata"]["content_hash"]
@@ -702,26 +699,26 @@ async def update_job_pg(
 async def update_job_state(
     redis: aioredis.Redis, job_id: str, state: dict
 ) -> None:
-    # [R2] json is now imported at top of file — no inline import needed
+
     await redis.setex(f"job:{job_id}", 3_600, json.dumps(state))
 
 
 async def get_job_state(
     redis: aioredis.Redis, job_id: str
 ) -> dict | None:
-    # [R2] json is now imported at top of file — no inline import needed
+
     raw = await redis.get(f"job:{job_id}")
     return json.loads(raw) if raw else None
 
 
 # ══════════════════════════════════════════════════════════
-# 7. MAIN PIPELINE  [B4 — pg_pool NEVER created inside here]
+# 7. MAIN PIPELINE
 # ══════════════════════════════════════════════════════════
 
 async def ingest_pipeline(
     pdf_paths: list[str],
-    pg_pool: asyncpg.Pool,          # [B4] always required — no internal fallback
-    redis: aioredis.Redis,          # [B2] required for BM25 persistence + job state
+    pg_pool: asyncpg.Pool,
+    redis: aioredis.Redis,
     ingested_by: str = "system",
     job_id: str | None = None,
 ) -> dict[str, Any]:
@@ -765,7 +762,7 @@ async def ingest_pipeline(
         # ── Step 3: Embed ──────────────────────────────────
         embedded = await embed_all_chunks(unique)
 
-        # ── Step 4: Semantic merge  [C1 + C2] ─────────────
+        # ── Step 4: Semantic merge   ─────────────
         embedded = await _semantic_merge(embedded)
 
         await update_job_state(redis, job_id, {"status": "upserting", "progress": 80})
@@ -792,13 +789,12 @@ async def ingest_pipeline(
                 info["total_pages"], info["chunks"], ingested_by,
             )
 
-        # ── Step 7: Rebuild + persist BM25  [B2] ──────────
+        # ── Step 7: Rebuild + persist BM25  ──────────
         # Rebuild before capturing elapsed so the reported time reflects
-        # the full pipeline including BM25.  [R3]
+        # the full pipeline including BM25.
         logger.info(f"[{job_id}] Rebuilding BM25 index …")
         await rebuild_bm25_index(redis=redis)
 
-        # [R3] elapsed captured AFTER BM25 rebuild — includes full pipeline
         elapsed = time.perf_counter() - t0
 
         await update_job_pg(pg_pool, job_id, len(pdf_paths), upserted)

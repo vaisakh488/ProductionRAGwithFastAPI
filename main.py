@@ -50,7 +50,7 @@ from auth import (
     User,
     UserCreate,
     USERS_SCHEMA_SQL,
-    _PLACEHOLDER_HASH,          # [R1] used for parameterized admin seed INSERT
+    _PLACEHOLDER_HASH,
     authenticate_user_db,
     blocklist_token,
     create_access_token,
@@ -63,7 +63,7 @@ from auth import (
     require_role,
 )
 from ingest import (
-    MAX_UPLOAD_BYTES,   # single source of truth — defined in ingest.py
+    MAX_UPLOAD_BYTES,
     PDF_DIR,
     bm25_index,
     get_job_state,
@@ -120,9 +120,6 @@ async def lifespan(app: FastAPI):
         # Run DDL — creates tables if they don't exist
         await conn.execute(USERS_SCHEMA_SQL)
 
-        # [R1] Seed admin row — parameterized, no SQL interpolation.
-        # ON CONFLICT DO NOTHING means this is safe to run on every startup.
-        # The placeholder hash locks the account until ADMIN_PASSWORD is applied.
         await conn.execute(
             "INSERT INTO users (username, email, hashed_password, role) "
             "VALUES ($1, $2, $3, $4) ON CONFLICT (username) DO NOTHING",
@@ -147,7 +144,7 @@ async def lifespan(app: FastAPI):
     app.state.redis = aioredis.from_url(REDIS_URL, decode_responses=True)
     logger.info("Redis client ready")
 
-    # ── BM25: try Redis cache first, fall back to Qdrant  [B2] ──
+    # ── BM25: try Redis cache first, fall back to Qdrant  ──
     try:
         loaded = await bm25_index.load_from_redis(app.state.redis)
         if loaded:
@@ -166,7 +163,7 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning(f"BM25 startup failed (non-fatal): {exc}")
 
-    # ── LangGraph agent + AsyncPostgresSaver  [C3] ────────
+    # ── LangGraph agent + AsyncPostgresSaver  ────────
     try:
         await init_agent(app.state.pg_pool)
         logger.info("LangGraph agent ready (AsyncPostgresSaver checkpointer)")
@@ -254,7 +251,7 @@ def get_redis(request: Request) -> aioredis.Redis:
 # ── SCHEMAS ───────────────────────────────────────────────
 
 class ChatRequest(BaseModel):
-    # [R3] question bounded: non-empty, max 4000 chars to prevent oversized payloads.
+    #  question bounded: non-empty, max 4000 chars to prevent oversized payloads.
     # thread_id bounded: max 100 chars — used as a Redis/DB key.
     question:  str = Field(..., min_length=1, max_length=4000)
     thread_id: str = Field("default", max_length=100)
@@ -303,7 +300,7 @@ async def _register_job(pool: asyncpg.Pool, job_id: str, total_files: int) -> No
                 job_id, total_files,
             )
     except Exception as e:
-        # [R6] Logged at ERROR — a missing job row means /jobs/{job_id} returns
+        # Logged at ERROR — a missing job row means /jobs/{job_id} returns
         # 404 from the PostgreSQL path, which is confusing to operators.
         logger.error(f"Could not register job {job_id}: {e}")
 
@@ -488,7 +485,7 @@ async def health(
 
 
 # ── DEBUG HISTORY (env-gated) ─────────────────────────────
-# [R8] Only registered when DEBUG_ENDPOINTS_ENABLED=true.
+#  Only registered when DEBUG_ENDPOINTS_ENABLED=true.
 #      Exposes internal agent state — must never be active in production.
 #      Gate via env var rather than just role so it can be fully absent
 #      from the routing table in production builds.
@@ -542,7 +539,7 @@ async def metrics_custom(current_user: User = Depends(require_role("admin"))):
 
 
 # ══════════════════════════════════════════════════════════
-# INGEST  [B3] — enqueues to Celery, never runs in-process
+# INGEST  — enqueues to Celery, never runs in-process
 # ══════════════════════════════════════════════════════════
 
 @app.post("/ingest", response_model=IngestJobResponse, tags=["Documents"])
@@ -559,14 +556,14 @@ async def ingest_pdf(
 
     job_id = str(uuid.uuid4())
 
-    # [FIX] Prefix with job_id — prevents filename collision on concurrent uploads
+    #  Prefix with job_id — prevents filename collision on concurrent uploads
     stored_name = f"{job_id}_{safe_name}"
     file_path   = Path(PDF_DIR) / stored_name
     file_path.write_bytes(content)
 
     await _register_job(pool, job_id, 1)
 
-    # [B3] Fire-and-forget to Celery worker — API returns immediately
+    #  Fire-and-forget to Celery worker — API returns immediately
     run_ingest_task.apply_async(
         kwargs={
             "pdf_paths":   [str(file_path)],
@@ -599,7 +596,7 @@ async def ingest_bulk(
     for f in files:
         safe_name   = _safe_filename(f.filename)
         content     = await _read_and_validate(f)
-        # [FIX] job_id prefix — prevents concurrent upload collision
+        #  job_id prefix — prevents concurrent upload collision
         stored_name = f"{job_id}_{safe_name}"
         dest        = Path(PDF_DIR) / stored_name
         dest.write_bytes(content)
@@ -610,7 +607,7 @@ async def ingest_bulk(
 
     await _register_job(pool, job_id, len(pdf_paths))
 
-    # [B3] Single Celery task handles all files in the bulk upload
+    #  Single Celery task handles all files in the bulk upload
     run_ingest_task.apply_async(
         kwargs={
             "pdf_paths":   pdf_paths,
@@ -623,7 +620,7 @@ async def ingest_bulk(
     logger.info(f"Enqueued bulk ingest job {job_id} for {len(pdf_paths)} files")
     return IngestJobResponse(
         job_id=job_id,
-        # [R5] Use actual job_id variable — was {{job_id}} which printed literal "{job_id}"
+        #  Use actual job_id variable — was {{job_id}} which printed literal "{job_id}"
         message=f"Bulk ingestion queued for {len(pdf_paths)} files — poll /jobs/{job_id}",
         files_queued=len(pdf_paths),
     )

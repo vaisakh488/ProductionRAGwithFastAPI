@@ -44,17 +44,6 @@ CONCURRENCY:
   The --concurrency CLI flag still overrides conf if explicitly passed.
   Formula: concurrency * EMBED_CONCURRENCY * BATCH_SIZE * ~6KB ≈ RAM needed.
 
-REVIEW FIXES (v5.1):
-  [R1] rebuild_bm25_periodic accesses _redis and _loop directly instead of
-       calling _get_resources(). Previously _get_resources() required pg_pool
-       to be initialised — if PostgreSQL was down at worker startup the task
-       raised RuntimeError even though it never touches the database.
-       Now uses explicit None checks on only the resources it actually needs.
-  [R2] CELERY_WORKER_CONCURRENCY env var wired into celery_app.conf as
-       worker_concurrency. Previously the env var was only applied when
-       docker-compose passed --concurrency on the CLI. Bare-metal and CI
-       runs ignored it and fell back to Celery's default (CPU count).
-       docker-compose --concurrency flag still overrides conf if set.
 """
 
 from __future__ import annotations
@@ -90,7 +79,7 @@ celery_app = Celery(
 )
 
 celery_app.conf.update(
-    # [R2] Wire CELERY_WORKER_CONCURRENCY into conf so it applies regardless
+    # Wire CELERY_WORKER_CONCURRENCY into conf so it applies regardless
     # of how the worker is started (docker-compose, bare metal, CI).
     # The --concurrency CLI flag still overrides this if explicitly passed.
     worker_concurrency         = int(os.getenv("CELERY_WORKER_CONCURRENCY", "2")),

@@ -309,6 +309,7 @@ Once the system starts successfully and you can log in as admin, **remove `ADMIN
 | `GET` | `/history/{thread_id}` | Bearer | any | Conversation history |
 | `GET` | `/health` | — | — | Service health check |
 | `GET` | `/metrics` | — | — | Prometheus metrics |
+| `POST` | `/chat/eval` | Bearer | any | Evaluation endpoint — full pipeline diagnostics |
 
 ### Rate limits
 
@@ -321,6 +322,7 @@ Once the system starts successfully and you can log in as admin, **remove `ADMIN
 | `/chat/stream` | 20 / minute |
 | `/jobs/{job_id}` | 60 / minute |
 | `/documents` | 30 / minute |
+| `/chat/eval` | 10 / minute |
 
 ---
 
@@ -409,6 +411,140 @@ curl -X POST http://localhost:8000/chat/stream \
 
 Returns `text/event-stream` — tokens stream as `data: <token>\n\n`, ends with `data: [DONE]\n\n`.
 
+
+### Evaluation endpoint
+
+Runs the full RAG pipeline and returns complete diagnostics — retrieved contexts,
+latency breakdown per stage, retrieval stats, and system info. Designed for
+automated evaluation against a golden set.
+
+**Stateless** — does not write to conversation history or LangGraph checkpoints,
+so evaluation runs are reproducible and never pollute real user sessions.
+
+```bash
+curl -X POST http://localhost:8000/chat/eval \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What are the key provisions of the act?", "thread_id": "eval-run-001"}'
+```
+
+Response:
+```json
+{
+  "answer": "The key provisions include...",
+  "question": "What are the key provisions of the act?",
+  "rewritten_query": "key provisions requirements obligations act legislation",
+  "thread_id": "eval-run-001",
+
+  "retrieved_contexts": [
+    {
+      "content": "Section 4 mandates that every data fiduciary...",
+      "source": "DPDP.pdf",
+      "page": 4,
+      "chunk_index": 12,
+      "chunk_size": 847,
+      "content_hash": "a3f9c2...",
+      "doc_id": "uuid-...",
+      "total_pages": 42,
+      "file_size": 1048576,
+      "chunk_type": "recursive"
+    }
+    // ... up to 8 items — all reranked docs in rank order
+  ],
+
+  "retrieval": {
+    "dense_docs_count": 30,
+    "sparse_docs_count": 18,
+    "reranked_docs_count": 8,
+    "overlap_count": 11,
+    "reranked_sources": ["DPDP.pdf", "contract.pdf"],
+    "bm25_was_ready": true,
+    "query_was_rewritten": true
+  },
+
+  "context": {
+    "total_chars_used": 42381,
+    "total_chars_limit": 80000,
+    "utilization_pct": 52.9,
+    "docs_used": 8,
+    "docs_truncated": 0
+  },
+
+  "latency_ms": {
+    "query_rewrite": 312.4,
+    "dense_retrieval": 87.1,
+    "sparse_retrieval": 3.2,
+    "reranking": 224.6,
+    "generation": 1843.2,
+    "total": 2470.5
+  },
+
+  "system": {
+    "reranker_backend": "baai",
+    "bm25_ready": true,
+    "model": "gpt-4o-mini",
+    "embedding_model": "text-embedding-3-small",
+    "top_k_dense": 30,
+    "top_k_sparse": 30,
+    "top_k_rerank": 8,
+    "timestamp": "2026-06-09T10:23:44.123456+00:00"
+  }
+}
+```
+
+### Field reference
+
+| Field | Description |
+|---|---|
+| `answer` | Final LLM-generated answer |
+| `question` | Original question as sent |
+| `rewritten_query` | Query after LLM rewrite — used for actual retrieval |
+| `retrieved_contexts` | Reranked top 8 docs — exactly what the LLM saw |
+| `retrieved_contexts[].content` | Full chunk text |
+| `retrieved_contexts[].source` | PDF filename |
+| `retrieved_contexts[].page` | 1-based page number |
+| `retrieved_contexts[].chunk_type` | `recursive` or `semantic_merged` |
+| `retrieval.overlap_count` | Docs that appeared in both dense and sparse results |
+| `retrieval.query_was_rewritten` | Whether the LLM changed the question for retrieval |
+| `context.docs_truncated` | Docs cut due to 80k char context window limit |
+| `latency_ms.*` | Per-stage timing — useful for identifying bottlenecks |
+| `system.reranker_backend` | `baai` (worker image) or `flashrank` (API image fallback) |
+
+### How your evaluation app should use this
+
+```python
+import httpx
+
+def evaluate_question(question: str, golden_answer: str, token: str):
+    response = httpx.post(
+        "http://localhost:8000/chat/eval",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"question": question, "thread_id": "eval"},
+    ).json()
+
+    return {
+        # For LLM-based scoring (RAGAS, DeepEval, custom)
+        "question":           question,
+        "answer":             response["answer"],
+        "contexts":           [c["content"] for c in response["retrieved_contexts"]],
+        "ground_truth":       golden_answer,
+
+        # For retrieval evaluation
+        "rewritten_query":    response["rewritten_query"],
+        "sources_retrieved":  response["retrieval"]["reranked_sources"],
+        "overlap_count":      response["retrieval"]["overlap_count"],
+        "bm25_contributed":   response["retrieval"]["sparse_docs_count"] > 0,
+
+        # For performance benchmarking
+        "total_latency_ms":   response["latency_ms"]["total"],
+        "generation_ms":      response["latency_ms"]["generation"],
+        "context_used_pct":   response["context"]["utilization_pct"],
+    }
+```
+
+This output is directly compatible with **RAGAS**, **DeepEval**, and **TruLens** —
+pass `question`, `answer`, and `contexts` into any of these frameworks for
+faithfulness, answer relevancy, and context precision scoring.
 ---
 
 ## Ingestion pipeline
@@ -594,6 +730,54 @@ Query logs in Grafana → Explore → Loki:
 ```
 
 ---
+
+## Evaluation
+
+The `/chat/eval` endpoint is designed for automated evaluation pipelines. It runs
+the identical pipeline as `/chat` but returns full diagnostics without writing to
+conversation history.
+
+### Compatible evaluation frameworks
+
+| Framework | What to pass |
+|---|---|
+| RAGAS | `question`, `answer`, `contexts` (list of content strings), `ground_truth` |
+| DeepEval | `input`, `actual_output`, `retrieval_context` |
+| TruLens | `input`, `response`, `context` |
+| Custom | compare `answer` against golden set, check `sources_retrieved` |
+
+### Suggested golden set format
+
+```json
+[
+  {
+    "question": "What are the data retention obligations?",
+    "golden_answer": "Data fiduciaries must not retain personal data beyond...",
+    "golden_sources": ["DPDP.pdf"],
+    "golden_pages": [12, 13]
+  }
+]
+```
+
+### What to measure
+
+```
+Retrieval quality:
+  → Did reranked_sources contain the golden_sources?
+  → Was overlap_count > 0? (hybrid retrieval working)
+  → Was query_was_rewritten = true? (rewriter functioning)
+
+Answer quality (LLM-scored):
+  → Faithfulness — is the answer grounded in retrieved_contexts?
+  → Answer relevancy — does it address the question?
+  → Context precision — are the retrieved chunks actually relevant?
+
+Performance:
+  → latency_ms.total — end-to-end response time
+  → latency_ms.generation — LLM call time (largest component)
+  → latency_ms.reranking — cross-encoder time (second largest)
+  → context.utilization_pct — how much of the 80k window was used
+```
 
 ## Docker image breakdown
 

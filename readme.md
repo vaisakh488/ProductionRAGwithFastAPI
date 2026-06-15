@@ -449,7 +449,7 @@ Response:
       "file_size": 1048576,
       "chunk_type": "recursive"
     }
-    // ... up to 8 items — all reranked docs in rank order
+  
   ],
 
   "retrieval": {

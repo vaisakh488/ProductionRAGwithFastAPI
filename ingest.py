@@ -833,16 +833,19 @@ async def ingest_pipeline(
 
 
 # ══════════════════════════════════════════════════════════
-# 8. SYNC WRAPPERS (backward compat / CLI)
+# 8. SYNC WRAPPERS (backward compact / CLI)
 # ══════════════════════════════════════════════════════════
 
 def _ensure_collection_sync(client: QdrantClient) -> None:
     collections = [c.name for c in client.get_collections().collections]
     if COLLECTION_NAME not in collections:
-        client.create_collection(
-            collection_name=COLLECTION_NAME,
-            vectors_config=VectorParams(size=EMBEDDING_DIM, distance=Distance.COSINE),
-        )
+        try:
+            client.create_collection(...)
+        except Exception as exc:
+            collections_now = [c.name for c in client.get_collections().collections]
+            if COLLECTION_NAME not in collections_now:
+                raise  # real error — re-raise
+            logger.debug("Collection already created by another worker")
 
 
 def get_vectorstore() -> QdrantVectorStore:

@@ -39,6 +39,8 @@ from slowapi.util import get_remote_address
 from werkzeug.utils import secure_filename
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from agent import arun_rag_evaluate   # add to existing agent import block
+
 import agent as _agent
 from agent import arun_rag, graph, init_agent, shutdown_agent
 from auth import (
@@ -789,6 +791,52 @@ async def get_history(
         messages = []
 
     return {"thread_id": thread_id, "messages": messages}
+
+
+
+
+# New response model
+class EvalResponse(BaseModel):
+    answer:             str
+    question:           str
+    rewritten_query:    str
+    thread_id:          str
+    retrieved_contexts: list[dict]
+    retrieval:          dict
+    context:            dict
+    latency_ms:         dict
+    system:             dict
+
+# New endpoint for Evaluation
+@app.post("/chat/eval", response_model=EvalResponse, tags=["Evaluation"])
+@limiter.limit("10/minute")
+async def chat_eval(
+    request: Request,
+    body: ChatRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Evaluation endpoint — identical pipeline to /chat but:
+    - Returns full diagnostics for every pipeline stage
+    - retrieved_contexts = reranked top 8 (what the LLM actually saw)
+    - Stateless: does not write to conversation history / checkpoints
+    - Designed for automated evaluation against a golden set
+    """
+    if not body.question.strip():
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
+    if _agent.graph is None:
+        raise HTTPException(status_code=503, detail="Agent not ready")
+
+    try:
+        result = await arun_rag_evaluate(question=body.question)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Eval pipeline error: {exc}")
+
+    return EvalResponse(
+        question=body.question,
+        thread_id=body.thread_id,
+        **result,
+    )
 
 
 # ── ENTRY POINT ───────────────────────────────────────────

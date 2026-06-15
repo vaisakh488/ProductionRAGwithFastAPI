@@ -11,6 +11,7 @@ import os
 import sys
 import time
 from typing import Annotated
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from langchain_core.documents import Document
@@ -526,3 +527,121 @@ async def arun_rag(question: str, thread_id: str = "default") -> str:
 def run_rag(question: str, thread_id: str = "default") -> str:
     """Sync wrapper — for CLI / tests only. Do NOT call from async context."""
     return asyncio.run(arun_rag(question, thread_id))
+
+
+# NEW function — sits alongside arun_rag(), never modifies it
+async def arun_rag_evaluate(question: str) -> dict:
+    """
+    Evaluation entry point — same pipeline as /chat but:
+    - Stateless: no LangGraph checkpoint written
+    - Returns full diagnostics: reranked contexts, latency breakdown, system info
+    - retrieved_contexts = reranked top 8 only (what the LLM actually saw)
+    """
+    t_total = time.perf_counter()
+
+    # 1. Query rewrite
+    t0 = time.perf_counter()
+    rewritten_query = await _rewrite_query(question)
+    rewrite_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+    # 2. Dense retrieval
+    t0 = time.perf_counter()
+    dense_docs = await _dense_retrieve(rewritten_query)
+    dense_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+    # 3. Sparse retrieval
+    t0 = time.perf_counter()
+    sparse_docs = await _run_in_thread(_sparse_retrieve, rewritten_query)
+    sparse_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+    # 4. Rerank
+    t0 = time.perf_counter()
+    reranked_docs = await _rerank(question, dense_docs, sparse_docs)
+    rerank_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+    # 5. Generate — stateless, no chat_history passed
+    t0 = time.perf_counter()
+    answer = await _generate(question, reranked_docs, chat_history=None)
+    gen_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+    total_ms = round((time.perf_counter() - t_total) * 1000, 2)
+
+    # --- build context window stats (mirrors _generate logic) ---
+    docs_used, total_chars, docs_truncated = _context_stats(reranked_docs)
+
+    return {
+        "answer": answer,
+        "rewritten_query": rewritten_query,
+
+        "retrieved_contexts": [
+            {
+                "content":      doc.page_content,
+                "source":       doc.metadata.get("source", "unknown"),
+                "page":         doc.metadata.get("page"),
+                "chunk_index":  doc.metadata.get("chunk_index"),
+                "chunk_size":   doc.metadata.get("chunk_size"),
+                "content_hash": doc.metadata.get("content_hash"),
+                "doc_id":       doc.metadata.get("doc_id"),
+                "total_pages":  doc.metadata.get("total_pages"),
+                "file_size":    doc.metadata.get("file_size"),
+                "chunk_type":   doc.metadata.get("chunk_type"),
+            }
+            for doc in reranked_docs          # all 8, in rank order
+        ],
+
+        "retrieval": {
+            "dense_docs_count":    len(dense_docs),
+            "sparse_docs_count":   len(sparse_docs),
+            "reranked_docs_count": len(reranked_docs),
+            "overlap_count":       len(
+                {_doc_hash(d) for d in dense_docs} &
+                {_doc_hash(d) for d in sparse_docs}
+            ),
+            "reranked_sources":    sorted({
+                d.metadata.get("source", "") for d in reranked_docs
+            }),
+            "bm25_was_ready":      bm25_index.is_ready,
+            "query_was_rewritten": rewritten_query.strip() != question.strip(),
+        },
+
+        "context": {
+            "total_chars_used":  total_chars,
+            "total_chars_limit": MAX_CONTEXT_CHARS,
+            "utilization_pct":   round(total_chars / MAX_CONTEXT_CHARS * 100, 1),
+            "docs_used":         docs_used,
+            "docs_truncated":    docs_truncated,
+        },
+
+        "latency_ms": {
+            "query_rewrite":   rewrite_ms,
+            "dense_retrieval": dense_ms,
+            "sparse_retrieval": sparse_ms,
+            "reranking":       rerank_ms,
+            "generation":      gen_ms,
+            "total":           total_ms,
+        },
+
+        "system": {
+            "reranker_backend":  RERANKER_BACKEND,
+            "bm25_ready":        bm25_index.is_ready,
+            "model":             "gpt-4o-mini",
+            "embedding_model":   "text-embedding-3-small",
+            "top_k_dense":       TOP_K,
+            "top_k_sparse":      TOP_K,
+            "top_k_rerank":      RERANK_TOP_K,
+            "timestamp":         datetime.now(timezone.utc).isoformat(),
+        },
+    }
+
+
+# small helper — mirrors the truncation logic inside _generate
+def _context_stats(docs: list[Document]) -> tuple[int, int, int]:
+    total, used = 0, 0
+    for doc in docs:
+        chunk_len = len(doc.page_content)
+        if total + chunk_len > MAX_CONTEXT_CHARS:
+            break
+        total += chunk_len
+        used += 1
+    truncated = len(docs) - used
+    return used, total, truncated

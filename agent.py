@@ -21,7 +21,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langsmith import traceable
 from typing_extensions import TypedDict
-
+import hashlib
 from ingest import bm25_index, get_vectorstore
 
 load_dotenv()
@@ -167,7 +167,10 @@ class State(TypedDict):
 
 # ── HELPERS ───────────────────────────────────────────────
 def _doc_hash(doc: Document) -> str:
-    return doc.metadata.get("content_hash") or str(hash(doc.page_content[:100]))
+    return (
+            doc.metadata.get("content_hash")
+            or hashlib.sha256(doc.page_content.encode()).hexdigest()
+    )
 
 
 # ── TRACED ASYNC FUNCTIONS ────────────────────────────────
@@ -472,8 +475,16 @@ async def init_agent(pg_pool) -> None:
             logger.info("Checkpoint schema already initialised by another worker — skipping setup")
         else:
             raise
+    # 4. Pre-warm reranker at startup — amortises 3-4s model load cost
+    logger.info("Pre-warming reranker …")
+    try:
+        await _run_in_thread(_get_reranker)
+        rn, _ = _get_reranker()
+        logger.info(f"Reranker ready: {rn}")
+    except Exception as exc:
+        logger.warning(f"Reranker pre-warm failed (will load on first request): {exc}")
 
-    # 4. Compile graph
+    # 5. Compile graph
     graph = _build_graph().compile(checkpointer=_checkpointer)
 
     logger.info("Agent initialised: AsyncPostgresSaver checkpointer ready")

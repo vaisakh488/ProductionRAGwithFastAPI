@@ -856,7 +856,7 @@ def get_vectorstore() -> QdrantVectorStore:
         collection_name=COLLECTION_NAME,
         embedding=embeddings,
         content_payload_key="page_content",
-        metadata_payload_key="metadata",
+        metadata_payload_key= None,
     )
 
 
